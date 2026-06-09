@@ -545,7 +545,7 @@ func (r *Reader) deriveTeamRoles() {
 	}
 	r.Header.Players = players
 	for _, p := range r.Header.Players {
-		if p.Operator == Recruit {
+		if p.Operator == Recruit || !p.Operator.RoleKnown() {
 			continue
 		}
 		role := p.Operator.Role()

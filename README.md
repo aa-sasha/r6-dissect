@@ -1,3 +1,21 @@
+# r6-dissect — unknown-operator fix (fork)
+
+> **This is a lightly patched fork of [redraskal/r6-dissect](https://github.com/redraskal/r6-dissect)
+> — all credit for r6-dissect goes to its author, Benjamin Ryan aka [redraskal](https://github.com/redraskal).**
+>
+> **What this fork changes** (4 small edits on top of `v0.24.0`):
+> the upstream `Operator.Role()` panics on operator IDs missing from the generated
+> role table, so replays containing operators released after the table was generated
+> (the 2026 roster: Denari, Rauora, Skopós, Sentry, Striker, …) crash the parser.
+> This fork makes `Role()` return an empty role instead of panicking, adds a
+> `RoleKnown()` guard, and guards the three call sites (`header.go`, `player.go`,
+> `site.go`) so header, players and killfeed parse fine for new-season replays.
+>
+> Built and used in production by [r6tv.online](https://r6tv.online) — a free 2D replay
+> player & esports library for R6 Siege. MIT license preserved (© 2022 Benjamin Ryan).
+
+---
+
 # r6-dissect
 [![](https://discordapp.com/api/guilds/936737628756271114/widget.png?style=shield)](https://discord.gg/XdEXWQZZAa)
 [![Go Reference](https://pkg.go.dev/badge/github.com/redraskal/r6-dissect.svg)](https://pkg.go.dev/github.com/redraskal/r6-dissect)

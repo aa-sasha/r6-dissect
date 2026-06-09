@@ -32,7 +32,7 @@ func readSpawn(r *Reader) error {
 		log.Debug().Str("site", formatted).Msg("defense site")
 		for i, p := range r.Header.Players {
 			defenseTeam := r.Header.Teams[p.TeamIndex].Role == Defense
-			defenseRole := p.Operator != Recruit && p.Operator != 0 && p.Operator.Role() == Defense
+			defenseRole := p.Operator != Recruit && p.Operator != 0 && p.Operator.RoleKnown() && p.Operator.Role() == Defense
 			if defenseTeam || defenseRole {
 				r.Header.Players[i].Spawn = formatted
 			}
