@@ -87,14 +87,18 @@ func (r *Reader) PlayerStats() []PlayerRoundStats {
 		winningTeamIndex = 1
 	}
 	for i, p := range r.Header.Players {
-		scorePlayer := r.Scoreboard.Players[i]
-		stats = append(stats, PlayerRoundStats{
+		// Новый патч R6 может отдавать пустой Scoreboard (длина 0) при полном
+		// Header.Players → индексация [i] паниковала. Guard: score/assists по наличию.
+		ps := PlayerRoundStats{
 			Username:  p.Username,
 			TeamIndex: p.TeamIndex,
 			Operator:  p.Operator.String(),
-			Assists:   int(scorePlayer.AssistsFromRound),
-			Score:     int(scorePlayer.Score),
-		})
+		}
+		if i < len(r.Scoreboard.Players) {
+			ps.Assists = int(r.Scoreboard.Players[i].AssistsFromRound)
+			ps.Score = int(r.Scoreboard.Players[i].Score)
+		}
+		stats = append(stats, ps)
 		index[p.Username] = i
 	}
 	lastDeath := -1

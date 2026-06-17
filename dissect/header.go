@@ -413,6 +413,11 @@ func (r *Reader) readHeader() (Header, error) {
 		}
 		_, lastProp = props["teamscore1"]
 	}
+	// Y11S2+: цикл завершается по teamscore1 ДО терминирующего ключа последнего
+	// игрока (playlistcategory/id сменились) → 10-й остаётся «висящим». Дофлашим.
+	if playerData && currentPlayer.Username != "" {
+		players = append(players, currentPlayer)
+	}
 	h := Header{
 		Teams:      [2]Team{},
 		Players:    players,

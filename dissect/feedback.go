@@ -1,6 +1,8 @@
 package dissect
 
 import (
+	"fmt"
+	"os"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -57,7 +59,45 @@ func (i *MatchUpdateType) UnmarshalJSON(data []byte) (err error) {
 var activity2 = []byte{0x00, 0x00, 0x00, 0x22, 0xe3, 0x09, 0x00, 0x79}
 var killIndicator = []byte{0x22, 0xd9, 0x13, 0x3c, 0xba}
 
+func readKillY11S2(r *Reader) error {
+	// Y11S2+: преамбула feedback изменилась (killIndicator на ~+39 от магика, не +42).
+	// Ищем killIndicator напрямую; структура килла после него прежняя.
+	if err := r.Seek(killIndicator); err != nil {
+		return err
+	}
+	username, err := r.String()
+	if err != nil {
+		return err
+	}
+	empty := len(username) == 0
+	if err = r.Skip(15); err != nil {
+		return err
+	}
+	target, err := r.String()
+	if err != nil {
+		return err
+	}
+	if empty && len(target) > 0 {
+		r.MatchFeedback = append(r.MatchFeedback, MatchUpdate{Type: Death, Username: target, Time: r.timeRaw, TimeInSeconds: r.time})
+		return nil
+	} else if empty {
+		return nil
+	}
+	u := MatchUpdate{Type: Kill, Username: username, Target: target, Time: r.timeRaw, TimeInSeconds: r.time}
+	for _, val := range r.MatchFeedback {
+		if val.Type == Kill && val.Username == u.Username && val.Target == u.Target {
+			return nil
+		}
+	}
+	fmt.Fprintf(os.Stderr, "FBK11 KILL %s -> %s\n", username, target)
+	r.MatchFeedback = append(r.MatchFeedback, u)
+	return nil
+}
+
 func readMatchFeedback(r *Reader) error {
+	if r.Header.CodeVersion >= Y11S2 {
+		return readKillY11S2(r)
+	}
 	if r.Header.CodeVersion >= Y9S1Update3 {
 		if err := r.Skip(38); err != nil {
 			return err
