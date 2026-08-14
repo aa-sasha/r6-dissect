@@ -36,6 +36,20 @@ type Reader struct {
 
 // NewReader decompresses in using zstd and
 // validates the dissect header.
+// truncatedOK — читаем ОБРЕЗАННЫЙ файл (префикс) ради заголовка. Ставится
+// только NewHeaderReader; разбор раунда по-прежнему требует целого файла.
+var truncatedOK bool
+
+// NewHeaderReader — Reader поверх префикса файла. Оборванный хвост zstd не
+// считается ошибкой: заголовок лежит в первых килобайтах потока.
+func NewHeaderReader(in io.Reader) (*Reader, error) {
+	truncatedOK = true
+	return NewReader(in)
+}
+
+// HeaderDone снимает режим префикса — зовётся после чтения заголовка.
+func HeaderDone() { truncatedOK = false }
+
 func NewReader(in io.Reader) (r *Reader, err error) {
 	br := bufio.NewReader(in)
 	chunkedCompression, err := testFileCompression(br)
@@ -123,9 +137,17 @@ func (r *Reader) readChunkedData(genericReader io.Reader) error {
 		if err = zstdReader.Reset(&tempReader); err != nil {
 			return err
 		}
-		decompressed, err := io.ReadAll(zstdReader)
-		if err != nil && !(len(decompressed) > 0 && errors.Is(err, zstd.ErrMagicMismatch)) {
-			return err
+		decompressed, derr := io.ReadAll(zstdReader)
+		if derr != nil && !(len(decompressed) > 0 && errors.Is(derr, zstd.ErrMagicMismatch)) {
+			// Файл может быть ОБРЕЗАН намеренно: для заголовка достаточно
+			// первых килобайт, и качать 8 МБ ради site+операторов незачем.
+			// Оборванный последний фрейм при этом не ошибка — оставляем то,
+			// что распаковалось, и выходим.
+			if truncatedOK {
+				data = append(data, decompressed...)
+				break
+			}
+			return derr
 		}
 		for _, b := range decompressed {
 			data = append(data, b)
@@ -182,13 +204,28 @@ func (r *Reader) worker(start int, end int, wg *sync.WaitGroup, matches chan<- m
 
 // Read continues reading the replay past the header until the EOF.
 func (r *Reader) Read() (err error) {
+	// Пустой буфер бывает на слишком коротком префиксе: воркер обращался к
+	// r.b[i] и падал паникой «index out of range with length 0».
+	if len(r.b) == 0 {
+		return errors.New("no decompressed data (file truncated too early?)")
+	}
 	numWorkers := 5
 	var wg sync.WaitGroup
 	channel := make(chan match, 300)
 	start := r.offset
 	end := len(r.b)
 	if r.readPartial {
-		end /= 3
+		// ⚠ Треть — НЕ оптимизация, а ГРАНИЦА ОСМЫСЛЕННОСТИ: заголовочные
+		// пакеты лежат в начале потока, а дальше идёт регион движения, где те
+		// же байтовые последовательности встречаются случайно. Сняв деление,
+		// я получил 1182 совпадения вместо горстки, ложные «пакеты игрока» и
+		// их разбеги до EOF — список игроков обнулялся.
+		// Но на КОРОТКОМ префиксе треть режет и без того малый буфер, и
+		// заголовок теряется. Поэтому: треть у больших буферов, целиком — у
+		// маленьких, где ложным совпадениям просто негде взяться.
+		if third := end / 3; third >= 4<<20 {
+			end = third
+		}
 	}
 	blockSize := int(math.Floor(float64(end-start) / float64(numWorkers)))
 	log.Debug().Int("workers", numWorkers).Int("blockSize", blockSize).Send()

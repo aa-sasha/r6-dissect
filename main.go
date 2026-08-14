@@ -41,6 +41,17 @@ func main() {
 		log.Fatal().Err(err).Send()
 	}
 	if viper.GetBool("info") {
+		// --info -f json: отдаём РАЗОБРАННЫЙ заголовок целиком (site, players с
+		// операторами, teams, roundNumber, timestamp, map). Человекочитаемый
+		// вывод печатает семь строк и теряет всё остальное, а заголовок уже
+		// содержит ровно то, что нужно статистике r6tv, и читается из ПРЕФИКСА
+		// файла — без полного парса раунда.
+		if format == JSON {
+			if err := writeHeadJSON(in, out); err != nil {
+				log.Fatal().Err(err).Send()
+			}
+			return
+		}
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 		if err := printHead(in); err != nil {
 			log.Fatal().Err(err).Send()
@@ -113,6 +124,20 @@ func setup() {
 	} else if len(format) == 0 {
 		viper.Set("format", "json")
 	}
+}
+
+// writeHeadJSON — заголовок реплея в JSON без полного чтения раунда.
+func writeHeadJSON(in *os.File, out io.Writer) error {
+	r, err := dissect.NewHeaderReader(in)
+	if err != nil {
+		return err
+	}
+	if err := r.ReadPartial(); !dissect.Ok(err) {
+		return err
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(r.Header)
 }
 
 func printHead(in *os.File) error {
