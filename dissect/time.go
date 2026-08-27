@@ -62,10 +62,25 @@ func (r *Reader) roundEnd() {
 		r.Header.Teams[1].Won = !team0Won
 	}
 
+	// ⚠ Имя из киллфида может НЕ найтись среди игроков: пакет игрока мог не
+	// разобраться (сборка Y11S2_Alpha03), а индекс -1 роняет весь разбор
+	// паникой. Раньше это не всплывало только потому, что проход обрывался
+	// раньше и до roundEnd дело не доходило.
+	team := func(name string) int {
+		i := r.PlayerIndexByUsername(name)
+		if i < 0 {
+			log.Debug().Str("username", name).Msg("feedback about unknown player — skipped")
+			return -1
+		}
+		return r.Header.Players[i].TeamIndex
+	}
 	for _, u := range r.MatchFeedback {
 		switch u.Type {
 		case Kill:
-			i := r.Header.Players[r.PlayerIndexByUsername(u.Target)].TeamIndex
+			i := team(u.Target)
+			if i < 0 {
+				break
+			}
 			deaths[i] = deaths[i] + 1
 			// fix killer username
 			if len(u.usernameFromScoreboard) > 0 {
@@ -73,14 +88,20 @@ func (r *Reader) roundEnd() {
 			}
 			break
 		case Death:
-			i := r.Header.Players[r.PlayerIndexByUsername(u.Username)].TeamIndex
+			i := team(u.Username)
+			if i < 0 {
+				break
+			}
 			deaths[i] = deaths[i] + 1
 			break
 		case DefuserPlantComplete:
 			planter = r.PlayerIndexByUsername(u.Username)
 			break
 		case DefuserDisableComplete:
-			i := r.Header.Players[r.PlayerIndexByUsername(u.Username)].TeamIndex
+			i := team(u.Username)
+			if i < 0 {
+				break
+			}
 			r.Header.Teams[i].Won = true
 			r.Header.Teams[i].WinCondition = DisabledDefuser
 			return

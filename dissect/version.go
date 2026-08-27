@@ -11,6 +11,7 @@ const (
 	Y9S1        int = 8111697
 	Y9S1Update3 int = 8211379
 	Y11S2       int = 9500000 // порог нового формата киллфида (alpha=9734089)
+	Y11S2Alpha3 int = 9734089
 	Y9S2        int = 8303162
 	Y9S3        int = 8506016
 	Y9S4        int = 8673114
