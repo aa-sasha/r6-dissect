@@ -1,6 +1,7 @@
 package dissect
 
 import (
+	"fmt"
 	"bufio"
 	"bytes"
 	"encoding/binary"
@@ -254,14 +255,26 @@ func (r *Reader) Read() (err error) {
 		return matches[i].offset < matches[j].offset
 	})
 	log.Debug().Int("matches", len(matches)).Msg("calling listeners")
+	// ⚠ Ошибка ОДНОГО слушателя больше не обрывает проход целиком.
+	// Инцидент 14.08.2026: на сборке Y11S2_Alpha03 ложный пакет игрока уводил
+	// Seek на 60.4 МБ до EOF, слушатель отдавал ошибку — и цикл выходил здесь,
+	// теряя всё, что лежало дальше. Пакет сайта лежал на 55 КБ, то есть данные
+	// были на месте, но до них не доживал разбор: сайт пропал у 968 раундов лиг.
+	// Смещение каждому слушателю выставляется заново, поэтому продолжать
+	// безопасно: испорченного состояния следующий не унаследует.
 	for _, entry := range matches {
 		for _, listener := range r.listeners[entry.listenerIndex] {
 			r.offset = entry.offset + 1
-			if err = listener(r); err != nil {
-				return
+			if lerr := listener(r); lerr != nil {
+				if !Ok(lerr) {
+					err = lerr
+					return
+				}
+				log.Debug().Err(lerr).Int("offset", entry.offset).Msg("listener skipped")
 			}
 		}
 	}
+	err = nil
 	if !r.readPartial {
 		r.roundEnd()
 	}
@@ -294,6 +307,38 @@ func (r *Reader) Listen(pattern []byte, callback func(r *Reader) error) {
 	r.listeners = append(r.listeners, []func(reader *Reader) error{callback})
 }
 
+
+// ErrSeekLimit — шаблон не найден в пределах разрешённого окна.
+var ErrSeekLimit = errors.New("seek limit reached")
+
+// SeekBounded ищет шаблон не дальше max байт и ПРИ НЕУДАЧЕ ВОЗВРАЩАЕТ смещение
+// назад. Нужен там, где шаблона в потоке может не быть вовсе: обычный Seek в
+// таком случае съедает файл до EOF, а вызывающий слушатель отдаёт ошибку —
+// и главный цикл обрывает весь проход, теряя всё, что лежит дальше.
+// Инцидент: сборка Y11S2_Alpha03, readPlayer уходил на 60.4 МБ, из-за чего не
+// читался пакет сайта, лежавший на 55 КБ (сайт пропал у 968 раундов лиг).
+func (r *Reader) SeekBounded(pattern []byte, max int) error {
+	start := r.offset
+	i := 0
+	for r.offset-start <= max {
+		b, err := r.Bytes(1)
+		if err != nil {
+			r.offset = start
+			return ErrSeekLimit
+		}
+		if b[0] != pattern[i] {
+			i = 0
+			continue
+		}
+		i++
+		if i == len(pattern) {
+			return nil
+		}
+	}
+	r.offset = start
+	return ErrSeekLimit
+}
+
 // Seek skips through the replay until the pattern is found.
 func (r *Reader) Seek(pattern []byte) error {
 	start := r.offset
@@ -305,7 +350,7 @@ func (r *Reader) Seek(pattern []byte) error {
 				pc, _, _, ok := runtime.Caller(1)
 				details := runtime.FuncForPC(pc)
 				if ok && details != nil {
-					log.Warn().Int("bytes", r.offset-start).Interface("func", details.Name()).Msg("large seek")
+					log.Warn().Int("bytes", r.offset-start).Str("pattern", fmt.Sprintf("% X", pattern)).Interface("func", details.Name()).Msg("large seek")
 				} else {
 					log.Warn().Int("bytes", r.offset-start).Msg("large seek")
 				}
